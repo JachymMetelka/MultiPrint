@@ -12,12 +12,11 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="MultiPrint IS")
 
-# Nastavení složky pro statické soubory (pro CSS, JS a obrázky)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Nastavení složky pro HTML šablony
 templates = Jinja2Templates(directory="templates")
 DB_FILE = "multiprint.db"
+DEMO_MODE = False
 
 def get_db():
     conn = sqlite3.connect(DB_FILE)
@@ -25,7 +24,6 @@ def get_db():
     return conn
 
 def init_db():
-    """Inicializuje tabulky. Vytvoří databázi zcela prázdnou bez demo dat."""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
@@ -122,7 +120,6 @@ def render_tab_context(request: Request, active_tab: str):
             api = fetch_prusalink_data(p["ip"], p["token"])
             if api:
                 current_file_val = api.get("current_file", "")
-                # Pokud tiskne, ale API nevrátilo název, zachováme původní z databáze
                 if api.get("status") == "Printing" and not current_file_val:
                     current_file_val = p.get("current_file", "")
                 elif api.get("status") != "Printing":
@@ -152,6 +149,7 @@ def render_tab_context(request: Request, active_tab: str):
         context={
             "request": request,
             "active_tab": active_tab,
+            "demo_mode": DEMO_MODE,
             "theme": request.cookies.get("theme", "light"),
             "printers": printers,
             "filaments": filaments,
@@ -244,6 +242,42 @@ async def delete_filament(f_id: int):
         conn.execute("UPDATE printers SET filament_id = NULL WHERE filament_id = ?", (f_id,))
         conn.commit()
     return RedirectResponse(url="/tab/filaments", status_code=303)
+
+@app.post("/settings/demo")
+async def toggle_demo(demo_active: str = Form(None)):
+    global DEMO_MODE
+    with get_db() as conn:
+        # Vyčistění databáze
+        conn.execute("DELETE FROM printers")
+        conn.execute("DELETE FROM filaments")
+        conn.execute("DELETE FROM print_queue")
+        conn.execute("DELETE FROM print_history")
+        
+        if demo_active == "on":
+            DEMO_MODE = True
+            # Vložení ukázkových filamentů
+            conn.execute("INSERT INTO filaments (id, type, color, weight) VALUES (1, 'PLA', 'Prusament Orange', 850)")
+            conn.execute("INSERT INTO filaments (id, type, color, weight) VALUES (2, 'PETG', 'Galaxy Black', 1000)")
+            
+            # Vložení ukázkových tiskáren
+            conn.execute("""
+                INSERT INTO printers (id, name, ip, token, status, progress, filament_id, temp_nozzle, target_nozzle, temp_bed, target_bed, time_remaining, current_file)
+                VALUES (1, 'Prusa MK3S+ Alpha', '192.168.1.50', 'demo', 'Printing', 68, 1, 215.0, 215.0, 60.0, 60.0, 1450, 'benchy.gcode')
+            """)
+            conn.execute("""
+                INSERT INTO printers (id, name, ip, token, status, progress, filament_id, temp_nozzle, target_nozzle, temp_bed, target_bed, time_remaining, current_file)
+                VALUES (2, 'Prusa MK4 Beta', '192.168.1.51', 'demo', 'Idle', 0, 2, 28.0, 0.0, 27.0, 0.0, 0, '')
+            """)
+            conn.execute("INSERT INTO printers (id, name, ip, token, status, progress, filament_id) VALUES (3, 'Prusa XL Gamma', '192.168.1.52', 'demo', 'Offline', 0, NULL)")
+            
+            # Fronta a historie
+            conn.execute("INSERT INTO print_queue (name, priority, status, estimated_g) VALUES ('shield.gcode', 'High', 'Waiting', 45)")
+            conn.execute("INSERT INTO print_queue (name, priority, status, estimated_g) VALUES ('enclosure_corner.gcode', 'Medium', 'Waiting', 120)")
+            conn.execute("INSERT INTO print_history (filename, printer_name, status, used_weight, date) VALUES ('pikachu.gcode', 'Prusa MK3S+ Alpha', 'Success', 35, ?)", (datetime.now().strftime("%d. %m. %Y"),))
+        else:
+            DEMO_MODE = False
+        conn.commit()
+    return RedirectResponse(url="/tab/settings", status_code=303)
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
