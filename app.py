@@ -6,10 +6,14 @@ from datetime import datetime
 import uvicorn
 
 from fastapi import FastAPI, Request, Form
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="MultiPrint IS")
+
+# Nastavení složky pro statické soubory (pro CSS, JS a obrázky)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Nastavení složky pro HTML šablony
 templates = Jinja2Templates(directory="templates")
@@ -91,11 +95,17 @@ def fetch_prusalink_data(ip: str, token: str) -> dict:
                 e_data = data.get("error", {})
                 state = p_data.get("state", "IDLE").capitalize()
                 progress = int(j_data.get("progress", 0)) if state == "Printing" else 0
+                
+                file_data = j_data.get("file")
+                if not isinstance(file_data, dict):
+                    file_data = {}
+                file_name = file_data.get("display_name") or file_data.get("name") or ""
+
                 return {
                     "status": state, "progress": progress,
                     "temp_nozzle": p_data.get("temp_nozzle", 0.0), "target_nozzle": p_data.get("target_nozzle", 0.0),
                     "temp_bed": p_data.get("temp_bed", 0.0), "target_bed": p_data.get("target_bed", 0.0),
-                    "time_remaining": j_data.get("time_remaining", 0), "current_file": j_data.get("file", {}).get("name", ""),
+                    "time_remaining": j_data.get("time_remaining", 0), "current_file": file_name,
                     "error_message": e_data.get("message", "")
                 }
     except Exception:
@@ -111,6 +121,13 @@ def render_tab_context(request: Request, active_tab: str):
         if p["ip"] not in ["192.168.1.50", "192.168.1.51"]:
             api = fetch_prusalink_data(p["ip"], p["token"])
             if api:
+                current_file_val = api.get("current_file", "")
+                # Pokud tiskne, ale API nevrátilo název, zachováme původní z databáze
+                if api.get("status") == "Printing" and not current_file_val:
+                    current_file_val = p.get("current_file", "")
+                elif api.get("status") != "Printing":
+                    current_file_val = ""
+
                 conn.execute("""
                     UPDATE printers SET 
                         status = ?, progress = ?, temp_nozzle = ?, target_nozzle = ?, 
@@ -119,7 +136,7 @@ def render_tab_context(request: Request, active_tab: str):
                 """, (
                     api.get("status", "Offline"), api.get("progress", 0), api.get("temp_nozzle", 0.0),
                     api.get("target_nozzle", 0.0), api.get("temp_bed", 0.0), api.get("target_bed", 0.0),
-                    api.get("time_remaining", 0), api.get("current_file", ""), api.get("error_message", ""), p["id"]
+                    api.get("time_remaining", 0), current_file_val, api.get("error_message", ""), p["id"]
                 ))
     conn.commit()
 
@@ -129,19 +146,24 @@ def render_tab_context(request: Request, active_tab: str):
     print_history = [dict(h) for h in conn.execute("SELECT * FROM print_history ORDER BY id DESC").fetchall()]
     conn.close()
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "active_tab": active_tab,
-        "printers": printers,
-        "filaments": filaments,
-        "print_queue": print_queue,
-        "print_history": print_history,
-        "errors_log": ERRORS_LOG,
-        "total_p": len(printers),
-        "printing_p": sum(1 for p in printers if p["status"] == "Printing"),
-        "idle_p": sum(1 for p in printers if p["status"] == "Idle"),
-        "error_p": sum(1 for p in printers if p["status"] in ["Offline", "Error"])
-    })
+    return templates.TemplateResponse(
+        request=request, 
+        name="index.html", 
+        context={
+            "request": request,
+            "active_tab": active_tab,
+            "theme": request.cookies.get("theme", "light"),
+            "printers": printers,
+            "filaments": filaments,
+            "print_queue": print_queue,
+            "print_history": print_history,
+            "errors_log": ERRORS_LOG,
+            "total_p": len(printers),
+            "printing_p": sum(1 for p in printers if p["status"] == "Printing"),
+            "idle_p": sum(1 for p in printers if p["status"] == "Idle"),
+            "error_p": sum(1 for p in printers if p["status"] in ["Offline", "Error"])
+        }
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):

@@ -202,7 +202,7 @@
                     <hr style="opacity: 0.15;">
                     <div class="form-check form-switch p-0 d-flex justify-content-between align-items-center" style="max-width: 400px;">
                         <label class="form-check-label" for="darkModeSwitch" style="cursor: pointer;">🌙 Aktivovat Tmavý režim (Dark Mode)</label>
-                        <input class="form-check-input ms-0" type="checkbox" id="darkModeSwitch" style="transform: scale(1.3); pointer; onchange=toggleTheme()">
+                        <input class="form-check-input ms-0" type="checkbox" id="darkModeSwitch" style="transform: scale(1.3); cursor: pointer;" onchange="toggleTheme()">
                     </div>
                 </div>
             </div>
@@ -231,7 +231,7 @@
         function previewGCode(filename) {
             document.getElementById('gcodeModalTitle').innerText = '📦 3D Náhled: ' + filename;
             const cleanName = filename.toLowerCase().replace('.gcode', '');
-            let imgUrl = "https://raw.githubusercontent.com/prusa3d/Original-Prusa-i3/master/Documentation/images/MK3S_isolated.png";
+            let imgUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Prusa_i3_MK3S.jpg/800px-Prusa_i3_MK3S.jpg";
             if (cleanName.includes('benchy')) {
                 imgUrl = "https://images.prusa3d.com/wp-content/uploads/2021/04/3dbenchy.jpg";
             } else if (cleanName.includes('corner') || cleanName.includes('enclosure')) {
@@ -239,7 +239,11 @@
             } else if (cleanName.includes('shield')) {
                 imgUrl = "https://images.prusa3d.com/wp-content/uploads/2020/03/shield_render.jpg";
             }
-            document.getElementById('gcodePreviewImg').src = imgUrl;
+            const imgEl = document.getElementById('gcodePreviewImg');
+            imgEl.onerror = function() {
+                this.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Prusa_i3_MK3S.jpg/800px-Prusa_i3_MK3S.jpg";
+            };
+            imgEl.src = imgUrl;
             new bootstrap.Modal(document.getElementById('gcodePreviewModal')).show();
         }
 
@@ -253,8 +257,13 @@
                 document.getElementById('detTempBed').innerText = p.temp_bed.toFixed(1);
                 document.getElementById('detTargetBed').innerText = p.target_bed.toFixed(1);
                 
-                if (p.current_file) {
-                    document.getElementById('detFile').innerHTML = `<a href="#" class="text-warning text-decoration-none" onclick="previewGCode('${p.current_file}')">📄 ${p.current_file}</a>`;
+                let fileName = p.current_file;
+                if (!fileName && p.status === 'Printing') {
+                    fileName = 'Aktivní tisk';
+                }
+                
+                if (fileName) {
+                    document.getElementById('detFile').innerHTML = `<a href="#" class="text-warning text-decoration-none" onclick="previewGCode('${fileName}')">📄 ${fileName}</a>`;
                 } else {
                     document.getElementById('detFile').innerText = 'Žádný aktivní tisk (Idle)';
                 }
@@ -282,7 +291,7 @@
         function filterHistory() {
             const selected = document.getElementById('historyPrinterFilter').value;
             document.querySelectorAll('.history-item-row').forEach(row => {
-                row.style.display = (selected === 'ALL' || row.getAttribute('data-printer'] === selected) ? '' : 'none';
+                row.style.display = (selected === 'ALL' || row.getAttribute('data-printer') === selected) ? '' : 'none';
             });
         }
 
@@ -302,6 +311,18 @@
             });
         }
     </script>
+    
+    {% if active_tab == 'dashboard' %}
+    <script>
+        // Automatická obnova Dashboardu každých 15 sekund
+        setInterval(() => {
+            // Refresh pouze pokud zrovna uživatel nekouká na detail nebo náhled (nemá otevřený Modal)
+            if (!document.body.classList.contains('modal-open')) {
+                window.location.reload();
+            }
+        }, 15000);
+    </script>
+    {% endif %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
